@@ -1,6 +1,6 @@
 # Job Set & Match!
 
-A Streamlit application that leverages Claude AI to analyze job offers and generate application materials.
+A Streamlit application that leverages Claude AI to analyze job offers and generate application materials. The tool streamlines the job search process by offering data-driven insights about career fit and application potential.
 
 ## Features
 
