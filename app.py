@@ -194,12 +194,30 @@ def generate_cover_letter(analysis: dict):
         else:
             st.error("Failed to generate cover letter")
 
+# def forget_offer(file_name: str):
+#     """Archive an offer and remove its analysis."""
+#     file_path = IN_PROGRESS_PATH / file_name
+#     if file_path.exists():
+#         if st.session_state.file_manager.move_to_archived(file_path):
+#             st.success(f"Archived {file_name}")
+#         else:
+#             st.error(f"Failed to archive {file_name}")
+
 def forget_offer(file_name: str):
-    """Archive an offer and remove its analysis."""
+    """Archive an offer and update its analysis status."""
+    # Move file to archive
     file_path = IN_PROGRESS_PATH / file_name
     if file_path.exists():
         if st.session_state.file_manager.move_to_archived(file_path):
+            # Update analysis forget status
+            analyses = st.session_state.data_handler.get_all_analyses()
+            for analysis in analyses:
+                if analysis["file_name"] == file_name:
+                    analysis["forget"] = True
+
             st.success(f"Archived {file_name}")
+            st.rerun()  # Force Streamlit to refresh
+
         else:
             st.error(f"Failed to archive {file_name}")
 
@@ -208,7 +226,11 @@ def display_dashboard():
     analyses = st.session_state.data_handler.get_all_analyses()
     api_usage = st.session_state.data_handler.get_api_usage()
 
-    analyses_ordered = sorted(analyses, key=lambda x: x["note_total"], reverse=True)
+    # Filter out forgotten analyses
+    active_analyses = [a for a in analyses if not a.get("forget", False)]
+
+    # Sort remaining analyses
+    analyses_ordered = sorted(active_analyses, key=lambda x: x["note_total"], reverse=True)
 
     # Analyses Table
     st.subheader("Job Offers")

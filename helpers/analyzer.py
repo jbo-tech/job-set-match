@@ -576,6 +576,7 @@ class OfferAnalyzer:
             # Enrich with analysis metadata
             analysis = {
                 **analysis_response,
+                "forget": False,
                 "note_total": analysis_response["careerFitAnalysis"]["careerDevelopmentRating"] \
                     + analysis_response["profileMatchAssessment"]["matchCompatibilityRating"] \
                     + analysis_response["competitiveProfile"]["successProbabilityRating"] \
