@@ -18,7 +18,7 @@ class FileManager:
     """Handles file operations for the application."""
 
     def __init__(self, new_dir: Path, in_progress_dir: Path, archived_dir: Path,
-                 max_file_size_mb: int = 10, cleanup_days: int = 30):
+                 max_file_size_mb: int = 30, cleanup_days: int = 30):
         """
         Initialize FileManager with directory paths and configuration.
 

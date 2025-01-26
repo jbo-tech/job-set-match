@@ -36,6 +36,12 @@ ENV/
 *.swo
 
 # Project specific
-data/
-offers/
+app/data/*.txt
+app/data/*.md
+app/data/*.csv
+app/data/*.json
+app/data/*.paquet
+app/offers/
+*.pdf
 .codecarbon.config
+*.jpg

@@ -112,6 +112,148 @@ class OfferAnalyzer:
                     </rules>
                     """
 
+    _prompt_company = """
+                    **ROLE**: You are an experienced business analyst and talent acquisition strategist
+
+                    ## Context
+
+                    You are assisting a professional with analyzing potential target companies for career opportunities, with a focus on data and tech positions. Your analysis should be thorough, data-driven, and presented in French.
+
+                    <instructions>
+                    ## Instructions
+
+                    1. Use all available sources (LinkedIn, company website, news articles, etc.)
+                    2. Maintain objectivity while providing strategic insights
+                    3. Score each section using the provided scales
+                    4. Format your response in French using the structure below
+
+                    ## Analysis Template
+
+                    <output format>
+                    ```bash
+                    ### I. Identity Card
+
+                    [Adopt a journalistic approach]
+                    - ** Name & vision **: [Name + tagline/mission]
+                    - ** Sector & positioning **: [Market analysis and positioning]
+                    - ** Key data **:
+                    - Creation: [Date]
+                    - Workforce: [Size + Evolution]
+                    - Implantations: [mapping]
+                    - Funding: [Structure + Latest Retlates]
+
+                    ### II. Tech & data analysis
+                    [Adopt a technical architect approach]
+                    - **Technical Ecosystem**
+                    - **Data & AI Organization**
+                    - **Innovative Projects**
+                    - **Tech Maturity Score**: [1-5 + justification]
+
+                        **Points to Analyze**
+                        1. Organizational Structure
+                            - Existence of a CDO/Head of Data
+                            - Size of the data team
+                            - Organization of teams (centralized vs decentralized)
+                        3. Technical Communication
+                            - Tech publications on their blog
+                            - Conference presentations
+                            - Employee LinkedIn articles
+                        4. Technology Stack
+                            - Tools used (via StackShare, job offers)
+                            - Cloud infrastructure
+                            - ML/AI frameworks
+
+                        **Note**
+                        1. Initial
+                            - Start of transformation : First data offers
+                            - Keywords: “implementation”, “initiate”, “develop”
+                            - Data team < 5 people
+                        2. In development
+                            - Structure in place : Technical stack established
+                            - Dedicated data team
+                            - Keywords: “optimize”, “improve”, “strengthen”
+                        3. Advanced
+                            - Mature data culture
+                            - Existing data/AI products
+                            - Technical publications
+                            - Keywords: "Innovate", "Scalability", "industrialization"
+
+                    ### III. Culture & Impact
+
+                    [Adopt an anthropological approach]
+                    - ** and & values ​​**
+                    - ** Social impact **
+                    - ** Learning culture **
+                    - ** Culture score **: [1-5 + justification]
+
+                        **points to check**
+                        1. Analysis of job offers:
+                            - inclusive language
+                            - Flexibility on the prerequisite
+                            - Emphasis on transverse skills
+                        2. Business culture:
+                            - Employee testimonials
+                            - Presence of conversion events
+                            - HR communication on diversity
+                        3. Recruitment history:
+                            - Linkedin profiles of current employees
+                            - Course of team members
+                            - Experience feedback on Glassdoor/Welcome to the Jungle
+
+                        **Note**
+                        1. Closed
+                            Traditional profiles only
+                            - Strict diploma requirements
+                            - specific years of experience required
+                            - No mention of "atypical profiles"
+                        2. Open with reserves
+                            Consider the conversions
+                            - Mention "or equivalent experience"
+                            - Valorization of soft skills
+                            - Some profiles already present in retraining
+                        3. Very open
+                            Actively supportive
+
+                    ### IV. Dynamics & Opportunities
+
+                    [Adopt a strategic approach]
+                    - **Growth Trajectory**
+                    - **Challenges & Opportunities**
+                    - **HR & Inclusion Policy**
+                    - **Potential Score**: [1-5 + justification]
+
+                    ### V. Strategic analysis
+
+                    [Adopt an advisory approval]
+                    - **Personal swot**: [Strengths/weaknesses/Opportunities/threats]
+                    - **Approach plan**: [Detailed strategy]
+                    - **Resources & Network**: [Contacts & leviers]
+
+                    ### VI. Summary & Recommendations
+
+                    - **Global score **: [/15 + analysis]
+                    - **go/no-go **: [argued decision]
+                    - **Action plan **: [3-6-12 months]
+                    - **Vigilance points **
+                    ```
+                    </output format>
+
+                    ## Crititeria evaluation
+
+                    [Detalled Scring Guidelines for Each Section]
+                    - Tech maturity (1-5)
+                    - Culture & values ​​(1-5)
+                    - Growth Potential (1-5)
+
+                    ## Output Requirements
+
+                    - Language: French
+                    - Format: Markdown
+                    - Length: comprehensive yet concise
+                    - Tone: Professional and analytical
+                    </instructions>
+                    """
+
     _prompt_analysis = """
                         **Objective**: Analyze a job offer to highlight key elements
 
@@ -122,7 +264,7 @@ class OfferAnalyzer:
 
                         1. Read and understand the entire job offer.
                         2. Consider unique aspects of the job offer and how they relate to the profile's background.
-                        3. Your analysis must cover all the mentionned points.
+                        3. Your analysis must cover all the mentionned points. Uses a framework to identify key verbatims, determine the company's level of data maturity, and identify the main issues.
                         4. After your analysis for each section, provide the final output for that section in the specified JSON format.
 
                         Your analysis should cover all the following points:
@@ -137,6 +279,8 @@ class OfferAnalyzer:
                             - Required qualifications
                             - Company context
                             - Working conditions (if mentioned)
+                        - Job Failures Factors: 3 possible failure factors for hiring, based on the company and the evolution of the sector.
+                        - Pain Points Analysis: based on the job description's context and requirements, identify the 2-3 key pain points the company is trying to address with this position.
 
                         2. Career Fit Analysis:
                         - What is in my interest given my career and my development?
@@ -173,9 +317,10 @@ class OfferAnalyzer:
 
                         5. Strategic Recommendations:
                         - Rate my chances out of 10
-                        - Is it realistic to expect to be offered the position? (Yes/No with explanation, under 7.5, it is no realistic)
-                        - Key points to emphasize in application
-                        - Specific keywords or skills to use in cover letter
+                        - Is it realistic to expect to be offered the position? (Yes/No with explanation, under 7.1, it is no realistic)
+                        - Key points in the job offer, find verbatim
+                        - Matching points with my profile
+                        - Specific keywords or skills to use in cover letter, find verbatim
                         - Suggested preparation steps
                         - Potential interview focus areas
 
@@ -191,18 +336,20 @@ class OfferAnalyzer:
                             "jobTitle": "",
                             "jobCompany": "",
                             "jobLocation": "",
-                            "jobOverview": ""
+                            "jobOverview": "",
+                            "jobFailureFactors": [],
+                            "jobPainPointsAnalysis": []
                         },
                         "careerFitAnalysis": {
-                            "careerAnalysis": "",
+                            "careerAnalysis": [],
                             "careerDevelopmentRating": 0,
                         },
                         "profileMatchAssessment": {
-                            "profileMatchAnalysis": "",
+                            "profileMatchAnalysis": [],
                             "matchCompatibilityRating": 0
                         },
                         "competitiveProfile": {
-                            "competitiveAnalysis": "",
+                            "competitiveAnalysis": [],
                             "successProbabilityRating": 0
                         },
                         "strategicRecommendations": {
@@ -211,7 +358,8 @@ class OfferAnalyzer:
                                 "explanation": "",
                                 "chanceRating": 0
                             },
-                            "keyPointsToEmphasize": [],
+                            "keyPointsInJobOffer": [],
+                            "matchingPointsWithProfile": [],
                             "keyWordsToUse": [],
                             "preparationSteps": "",
                             "interviewFocusAreas": ""
@@ -256,6 +404,7 @@ class OfferAnalyzer:
                         - Achievements: Must be listed in CV/profile
                         - Technical skills: Must appear in candidate documents
                         - Metrics: Must be from actual experiences
+                        - Wordings: Prefer the verbatim version of the offer posting if possible.
 
                         VERIFICATION CHECKLIST:
                         Before generating content, verify:
@@ -278,17 +427,20 @@ class OfferAnalyzer:
                         - Track record: Proven successful transitions and adaptations
                         - Unique perspective: Business strategy + Technical implementation
                         - Learning agility: Examples of rapid skill acquisition
+                        - Pain points resolution: Demonstrated ability to identify and solve business challenges
 
                         3. Value Alignment:
                         - Company fit: Match between mission and experience
                         - Technical relevance: Skills mapping to their needs
                         - Growth potential: Learning from and contributing to their team
+                        - Pain points match: Specific examples of solving similar challenges
 
                         STRUCTURE:
                         1. The Grab (15%):
                         - Company-centric opening showing research and understanding
                         - Connection to their mission/challenges/recent news
                         - Natural bridge to your unique profile
+                        - Acknowledgment of key pain point(s) identified
 
                         2. The Hook (25%):
                         Choose the most relevant approach:
@@ -327,6 +479,13 @@ class OfferAnalyzer:
                             - Learning agility evidence
                             - Fresh perspective benefits
                             - Hybrid skill set impact
+
+                        D. Pain Points Resolution:
+                            - Map specific elements from my profile that demonstrate how I can solve each of these challenges
+                            - Specific examples of identifying hidden business challenges
+                            - Concrete solutions implemented
+                            - Measurable results achieved
+                            - Adaptation potential for current context
 
                         4. Forward-Looking Close (20%):
                         - Specific contribution vision
@@ -468,13 +627,14 @@ class OfferAnalyzer:
             index = 1
 
             # Scan for all .txt files in DATA_PATH
-            for txt_file in DATA_PATH.glob("*.txt"):
+            # for file in [f for f in DATA_PATH.iterdir() if f.suffix in ['.txt', '.md']]:
+            for file in DATA_PATH.glob("*.[tm][xd]t"):
                 try:
-                    with open(txt_file, "r") as f:
+                    with open(file, "r") as f:
                         content = f.read().strip()
                         doc = f"""
                             <document index="{index}">
-                                <source>{txt_file.name}</source>
+                                <source>{file.name}</source>
                                 <document_content>
                                 {content}
                                 </document_content>
@@ -483,12 +643,12 @@ class OfferAnalyzer:
                         documents.append(doc)
                         index += 1
                 except Exception as e:
-                    self.logger.warning(f"Failed to read {txt_file}: {e}")
+                    self.logger.warning(f"Failed to read {file}: {e}")
                     continue
 
             if documents:
                 return f"""
-                        Find the following context about me:
+                        Find the following context about me and job analysis:
                         <documents>
                             {"".join(documents)}
                         </documents>
@@ -515,9 +675,9 @@ class OfferAnalyzer:
 
             # Construct message for Claude
             start_time = datetime.now(timezone.utc)
-            message = self.client.beta.prompt_caching.messages.create(
+            message = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
-                betas=["pdfs-2024-09-25", "prompt-caching-2024-07-31"],
+                #betas=["pdfs-2024-09-25", "prompt-caching-2024-07-31"],
                 max_tokens=4096,
                 temperature=0.2,
                 system=[
@@ -559,7 +719,7 @@ class OfferAnalyzer:
             print(f"Cached API call input tokens (cache read): {getattr(message.usage, 'cache_read_input_tokens', 0)} tokens")
             print(f"Cached API call input tokens (cache write): {getattr(message.usage, 'cache_creation_input_tokens', 0)} tokens")
             print(f"Cached API call output tokens : {message.usage.output_tokens} tokens")
-            print(f"Cached API call cost: ${message.usage.output_tokens * 0.00001}")
+            print(f"Cached API call cost: ${analysis_cost}")
 
             # Safe parsing of response
             try:
@@ -581,7 +741,7 @@ class OfferAnalyzer:
                     + analysis_response["profileMatchAssessment"]["matchCompatibilityRating"] \
                     + analysis_response["competitiveProfile"]["successProbabilityRating"] \
                     + analysis_response["strategicRecommendations"]['shouldApply']["chanceRating"],
-                "analysis_cost": message.usage.output_tokens * 0.00001,
+                "analysis_cost": analysis_cost,
                 "file_name": file_path.name,
                 "cover_letter": None
             }
@@ -643,9 +803,9 @@ class OfferAnalyzer:
         try:
             # Construct message for Claude
             start_time = datetime.now(timezone.utc)
-            message = self.client.beta.prompt_caching.messages.create(
+            message = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
-                betas=["pdfs-2024-09-25", "prompt-caching-2024-07-31"],
+                #betas=["pdfs-2024-09-25", "prompt-caching-2024-07-31"],
                 max_tokens=4096,
                 temperature=0.7,
                 system=[

@@ -147,15 +147,21 @@ class DataHandler:
 
     def get_all_analyses(self) -> List[Dict]:
         """
-        Get all analyses from the latest batch.
+        Get all analyses from all batches.
 
         Returns:
-            List[Dict]: List of all analyses in the current batch
+            List[Dict]: List of all analyses across all batches
         """
         try:
             if not self.data["analyses"]:  # If the list is empty
                 return []
-            return self.data["analyses"][-1]["offers"]
+
+            # Collect offers from all batches
+            all_offers = []
+            for batch in self.data["analyses"]:
+                all_offers.extend(batch["offers"])
+            return all_offers
+
         except (IndexError, KeyError):  # Handle possible errors
             return []
 
