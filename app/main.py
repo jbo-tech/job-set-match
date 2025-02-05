@@ -7,48 +7,31 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
-import os
-import json
-import base64
 
 # Import helpers
-from helpers import (
-    FileManager,
-    OfferAnalyzer,
-    DataHandler,
-    OFFERS_PATH,
-    NEW_OFFERS_PATH,
-    IN_PROGRESS_PATH,
-    ARCHIVED_PATH,
-    DATA_PATH,
-    ANALYSES_FILE,
-    MAX_FILE_SIZE_MB,
-    CLEANUP_DAYS
-)
+from app.core.file_manager import FileManager
+from app.core.data_handler import DataHandler
+from app.core.analyzer import OfferAnalyzer
+from app.config import init_config, IN_PROGRESS_PATH, ARCHIVED_PATH, MAX_FILE_SIZE_MB, CLEANUP_DAYS
 
 def check_environment():
     """Check if all required environment variables are set."""
-    if not os.getenv('ANTHROPIC_API_KEY'):
-        st.error("ANTHROPIC_API_KEY not found in environment variables. Please set it in your .env file.")
+    try:
+        config = init_config()
+        return True
+    except ValueError as e:
+        st.error(str(e))
         st.stop()
+        return False
 
-@st.cache_resource
 def init_file_manager():
-    return FileManager(
-        NEW_OFFERS_PATH,
-        IN_PROGRESS_PATH,
-        ARCHIVED_PATH,
-        max_file_size_mb=MAX_FILE_SIZE_MB,
-        cleanup_days=CLEANUP_DAYS
-    )
+    return FileManager()
 
-@st.cache_resource
 def init_analyzer():
     return OfferAnalyzer()
 
-@st.cache_resource
 def init_data_handler():
-    return DataHandler(ANALYSES_FILE)
+    return DataHandler()
 
 def initialize_app():
     """Initialize the application state and configuration."""
@@ -124,78 +107,7 @@ def analyze_new_offers():
         else:
             st.error(f"Failed to save analysis for {standardized_path.name}")
 
-def display_rating_with_gauge(title, rating):
-    st.markdown(f"### {title}")
-    # st.progress(rating/10)
-    st.markdown(f"Score: {rating}/10")
-
-def display_section_with_bullets(title, items, format: str = "streamlit"):
-    if not items:  # Handle empty/nonexistent data
-        items = ["No data available"]
-
-    if format == "markdown" and items:
-        section = f"**{title}**\n"
-        if type(items) == list:
-            for item in items:
-                section += f"- {item}\n" if not item == items[-1] else f"- {item}"
-        else:
-            section += f"{items}"
-        return section
-    elif items:
-        st.markdown(f"#### {title}")
-        if type(items) == list:
-            for item in items:
-                st.markdown(f"- {item}")
-        else:
-            st.markdown(f"{items}")
-
-def display_job_summary(job_summary):
-    st.markdown("### Résumé de l'offre")
-    st.markdown(f"**Entreprise:** {job_summary['jobCompany']}")
-    st.markdown(f"**Poste:** {job_summary['jobTitle']}")
-    st.markdown(f"**Localisation:** {job_summary['jobLocation']}")
-    st.markdown(f"**Aperçu:** {job_summary['jobOverview']}")
-    display_section_with_bullets("Facteurs de risque pour le recrutement:", job_summary['jobFailureFactors'], format="streamlit")
-    if job_summary.get('jobPainPointsAnalysis'):
-        display_section_with_bullets("Analyses des pain points:", job_summary['jobPainPointsAnalysis'], format="streamlit")
-
-def display_strategic_recommendations(recommendations):
-    """Display strategic recommendations with error handling."""
-    st.markdown(f"### Recommandations Stratégiques")
-
-    # Safely get decision data
-    decision_data = recommendations.get('shouldApply', {})
-    decision_icon = "✅" if decision_data.get('decision', False) else "❌"
-    chance_rating = decision_data.get('chanceRating', "N/A")
-    explanation = decision_data.get('explanation', "No explanation available")
-
-    st.markdown(f"{decision_icon} **Décision:** {chance_rating}/10\n\n{explanation}")
-
-    # Safely display key points with fallbacks
-    display_section_with_bullets(
-        "Points clés de l'offre",
-        recommendations.get('keyPointsInJobOffer', ["Aucun point clé disponible"])
-    )
-
-    display_section_with_bullets(
-        "Points clés de mon profil",
-        recommendations.get('matchingPointsWithProfile', ["Aucune correspondance identifiée"])
-    )
-
-    display_section_with_bullets(
-        "Mots-clés à utiliser",
-        recommendations.get('keyWordsToUse', ["Aucun mot-clé suggéré"])
-    )
-
-    # Handle optional fields
-    st.markdown("#### Étapes de préparation")
-    st.markdown(recommendations.get('preparationSteps', "Aucune étape fournie"))
-
-    st.markdown("#### Points d'attention pour l'entretien")
-    st.markdown(recommendations.get('interviewFocusAreas', "Aucun point d'attention spécifié"))
-
-@st.cache_data(ttl=600, show_spinner="Generating markdown...")
-def generate_markdown_content(analysis: dict) -> str:
+def generate_full_content(analysis: dict) -> str:
     """Generate markdown content for the analysis file.
 
     Args:
@@ -221,7 +133,7 @@ updated: {today}
     offer_content = analysis.get('offerContent', '')
 
     # Get strategic recommendations
-    strategic_content = markdown_strategic_recommendations(analysis)
+    strategic_content = generate_analysis_markdown(analysis)
 
     # Get cover letter if it exists
     cover_letter = ''
@@ -232,42 +144,24 @@ updated: {today}
 
     return f"{frontmatter}\n{offer_content}\n\n# Analyse\n{strategic_content}\n\n# Lettre de motivation\n{cover_letter}"
 
-@st.cache_data(ttl=600, show_spinner=False)
-def markdown_strategic_recommendations(analysis: dict) -> str:
-    """Format analysis for copying to clipboard."""
-    analysis_markdown = f"""
-### Résumé de l'offre
-**Poste**: {analysis['jobSummary']['jobTitle']}
-**Entreprise**: {analysis['jobSummary']['jobCompany']}
-**Localisation**: {analysis['jobSummary']['jobLocation']}
-**Aperçu**: {analysis['jobSummary']['jobOverview']}
-{display_section_with_bullets("Facteurs de risque pour le recrutement", analysis['jobSummary']['jobFailureFactors'], format="markdown")}
-{display_section_with_bullets("Analyses des pain points", analysis['jobSummary'].get('jobPainPointsAnalysis','//'), format="markdown")}
+def generate_analysis_markdown(analysis: dict):
+    """Generate markdown analysis for display."""
+    try:
+        if not hasattr(st.session_state, 'analyzer'):
+            st.error("Analyzer not initialized properly")
+            return ""
 
-### Intérêt pour votre carrière
-{display_section_with_bullets("Analyse", analysis['careerFitAnalysis']['careerAnalysis'], format="markdown")}
-**Note**: {analysis['careerFitAnalysis']['careerDevelopmentRating']}
+        if 'analysis_markdown' in analysis:
+            return analysis['analysis_markdown']
 
-### Adéquation du profil
-{display_section_with_bullets("Analyse", analysis['profileMatchAssessment']['profileMatchAnalysis'], format="markdown")}
-**Note**: {analysis['profileMatchAssessment']['matchCompatibilityRating']}
+        if not hasattr(st.session_state.analyzer, 'generate_analysis_markdown'):
+            st.error("Method not found in analyzer")
+            return ""
 
-### Probabilité de succès
-{display_section_with_bullets("Analyse", analysis['competitiveProfile']['competitiveAnalysis'], format="markdown")}
-**Note**: {analysis['competitiveProfile']['successProbabilityRating']}
-
-### Recommandations stratégiques:
-**Dois-je candidater à cette offre?**
-{"✅ oui" if analysis['strategicRecommendations']['shouldApply']['decision'] else "❌ non"} - {analysis['strategicRecommendations']['shouldApply']['chanceRating']}/10
-{analysis['strategicRecommendations']['shouldApply']['explanation']}
-{display_section_with_bullets("Points clés de l'offre", analysis['strategicRecommendations']['keyPointsInJobOffer'], format="markdown") if analysis['strategicRecommendations']['keyPointsInJobOffer'] else "Aucun point clé disponible"}
-{display_section_with_bullets("Points clés de mon profil", analysis['strategicRecommendations']['matchingPointsWithProfile'], format="markdown") if analysis['strategicRecommendations']['matchingPointsWithProfile'] else "Aucune correspondance identifiée"}
-{display_section_with_bullets("Mots-clés à utiliser", analysis['strategicRecommendations']['keyWordsToUse'], format="markdown") if analysis['strategicRecommendations']['keyWordsToUse'] else "Aucun mot-clé suggéré"}
-**Étapes de préparation**
-{analysis['strategicRecommendations']['preparationSteps']}
-{analysis['strategicRecommendations']['interviewFocusAreas']}
-    """
-    return analysis_markdown
+        return st.session_state.analyzer.generate_analysis_markdown(analysis)
+    except Exception as e:
+        st.error(f"Error generating markdown: {str(e)}")
+        return ""
 
 def generate_cover_letter(analysis: dict):
     """Generate cover letter using Claude API."""
@@ -305,7 +199,6 @@ def forget_offer(file_name: str):
         else:
             st.error(f"Failed to archive {file_name}")
 
-@st.cache_data(ttl=300, show_spinner=False)
 def get_pdf_path(file_name: str) -> Path:
     """Get the path to a PDF file, checking both in_progress and archived directories."""
     in_progress_path = IN_PROGRESS_PATH / file_name
@@ -402,32 +295,20 @@ def display_dashboard():
     # st.subheader("Job Offers")
     if not filtered_analyses:
         st.info("No analyzed offers to display.")
-        return
 
     # Display analyses grouped by day
     for day, day_analyses in grouped_analyses.items():
         st.markdown(f"### {day.strftime('%A %d %B %Y')} - {len(day_analyses)} offers")
         for analysis in day_analyses:
             decision_icon = "✅" if analysis['strategicRecommendations']['shouldApply']['decision'] else "❌"
-            with st.expander(f"{analysis['jobSummary']['jobCompany']} - {analysis['jobSummary']['jobTitle']} - {analysis['strategicRecommendations']['shouldApply']['chanceRating']}/10" , icon=decision_icon):
+            with st.expander(f"{analysis['jobSummary']['jobCompany']} - {analysis['jobSummary']['jobTitle']} - {analysis['strategicRecommendations']['shouldApply'].get('chanceRating', 0)}/10" , icon=decision_icon):
                 col1, col2 = st.columns([0.7, 0.3], gap="medium")
 
+                analysis_content = generate_analysis_markdown(analysis)
+
                 with col1:
-                    # Display job summary
-                    display_job_summary(analysis['jobSummary'])
 
-                    # Display scores with gauges
-                    display_rating_with_gauge("Développement de carrière", analysis['careerFitAnalysis']['careerDevelopmentRating'])
-                    display_section_with_bullets("Analyse", analysis['careerFitAnalysis']['careerAnalysis'], format="streamlit")
-
-                    display_rating_with_gauge("Compatibilité du profil", analysis['profileMatchAssessment']['matchCompatibilityRating'])
-                    display_section_with_bullets("Analyse", analysis['profileMatchAssessment']['profileMatchAnalysis'], format="streamlit")
-
-                    display_rating_with_gauge("Probabilité de succès", analysis['competitiveProfile']['successProbabilityRating'])
-                    display_section_with_bullets("Analyset", analysis['competitiveProfile']['competitiveAnalysis'], format="streamlit")
-
-                    # Display strategic recommendations
-                    display_strategic_recommendations(analysis['strategicRecommendations'])
+                    st.markdown(analysis_content)
 
                     # PDF viewer
                     pdf_path = get_pdf_path(analysis['file_name'])
@@ -453,7 +334,7 @@ def display_dashboard():
                     st.code(analysis.get('offerContent', ''), language=None)
 
                     # Display content preview
-                    st.code(markdown_strategic_recommendations(analysis), language=None)
+                    st.code(analysis_content, language=None)
 
                     st.divider()
 
@@ -475,11 +356,11 @@ def display_dashboard():
                     st.divider()
 
                     # Download markdown button
-                    markdown_content = generate_markdown_content(analysis)
+                    markdown_content = generate_full_content(analysis)
                     st.download_button(
                         "Download Analysis (.md)",
                         markdown_content,
-                        file_name=f"{analysis['jobSummary']['jobCompany']} - {analysis['jobSummary']['jobTitle']} - {analysis['strategicRecommendations']['shouldApply']['chanceRating']}.md",
+                        file_name=f"{analysis['jobSummary']['jobCompany']} - {analysis['jobSummary']['jobTitle']} - {analysis['strategicRecommendations']['shouldApply'].get('chanceRating', 0)}.md",
                         mime="text/markdown",
                         key=f"dl_{analysis['file_name']}-markdown"
                     )
@@ -504,6 +385,65 @@ def display_dashboard():
     - Max file size: {MAX_FILE_SIZE_MB}MB
     - Cleanup after: {CLEANUP_DAYS} days
     """)
+
+    # Add debug info in development
+    debug_info = st.sidebar.checkbox("Show Debug Info",key="debug_info")
+    if debug_info:
+
+        # Add internal state info
+        st.sidebar.write("Selected period:", period)
+        st.sidebar.write("Number of analyses loaded:", len(analyses))
+
+        # Add grouped analyses info
+        st.sidebar.subheader(f"Grouped analyses: {len(grouped_analyses)}")
+        if grouped_analyses:
+            st.sidebar.write("First group:", list(grouped_analyses.items())[0])
+            st.sidebar.divider()
+
+        # Add storage info
+        # st.sidebar.subheader("Storage Information:")
+        # st.sidebar.write("Storage Base Path:", st.session_state.data_handler.data_path)
+        # st.sidebar.write("Storage Files:")
+        # st.sidebar.write(f"- analyses.parquet exists: {(base_path / 'analyses.parquet').exists()}")
+        # st.sidebar.write(f"- api_usage.parquet exists: {(base_path / 'api_usage.parquet').exists()}")
+        # st.sidebar.divider()
+
+        # Add file manager info
+        st.sidebar.subheader("File System:")
+        st.sidebar.write(f"New Offers Path: {st.session_state.file_manager.new_dir}")
+        st.sidebar.write(f"Path exists: {st.session_state.file_manager.new_dir.exists()}")
+        st.sidebar.write(f"Files in directory: {list(st.session_state.file_manager.new_dir.glob('*.pdf'))}")
+        st.sidebar.divider()
+
+        # # Add analyses data
+        # st.sidebar.subheader("Analyses DataFrame Info:")
+        # st.sidebar.write(f"Number of records: {analyses_df.shape[0]}")
+        # st.sidebar.write(f"Shape: {analyses_df.shape}")
+        # if not analyses_df.empty:
+        #     st.sidebar.write("Data Types:", analyses_df.dtypes)
+        #     st.sidebar.write("First row:", analyses_df.iloc[0].to_dict())
+        #     st.sidebar.write(f"Columns: {analyses_df.columns.tolist()}")
+        # else:
+        #     st.sidebar.warning("DataFrame is empty!")
+        # st.sidebar.divider()
+
+        # # Add companies data
+        # st.sidebar.subheader("Companies DataFrame Info:")
+        # st.sidebar.write(f"Number of records: {companies_df.shape[0]}")
+        # st.sidebar.write(f"Shape: {companies_df.shape}")
+        # if not companies_df.empty:
+        #     st.sidebar.write("Data Types:", companies_df.dtypes)
+        #     st.sidebar.write("First row:", companies_df.iloc[0].to_dict())
+        #     st.sidebar.write(f"Columns: {companies_df.columns.tolist()}")
+        # else:
+        #     st.sidebar.warning("DataFrame is empty!")
+        # st.sidebar.divider()
+
+        # Verify API usage data
+        st.sidebar.subheader("API Usage:")
+        st.sidebar.write(api_usage)
+        st.sidebar.divider()
+
 
 def main():
     """Main application function."""

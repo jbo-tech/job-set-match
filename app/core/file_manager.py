@@ -14,11 +14,18 @@ import logging
 from typing import List, Optional
 import re
 
+from app.config import (
+    NEW_OFFERS_PATH,
+    IN_PROGRESS_PATH,
+    ARCHIVED_PATH,
+    MAX_FILE_SIZE_MB,
+    CLEANUP_DAYS
+)
+
 class FileManager:
     """Handles file operations for the application."""
 
-    def __init__(self, new_dir: Path, in_progress_dir: Path, archived_dir: Path,
-                 max_file_size_mb: int = 30, cleanup_days: int = 30):
+    def __init__(self):
         """
         Initialize FileManager with directory paths and configuration.
 
@@ -29,15 +36,24 @@ class FileManager:
             max_file_size_mb (int): Maximum allowed file size in MB
             cleanup_days (int): Number of days after which archived files are deleted
         """
-        self.new_dir = new_dir
-        self.in_progress_dir = in_progress_dir
-        self.archived_dir = archived_dir
-        self.max_file_size_bytes = max_file_size_mb * 1024 * 1024
-        self.cleanup_days = cleanup_days
+        # Initialize directories
+        self.new_dir = NEW_OFFERS_PATH
+        self.in_progress_dir = IN_PROGRESS_PATH
+        self.archived_dir = ARCHIVED_PATH
+
+        # Initialize configuration
+        self.max_file_size_mb = MAX_FILE_SIZE_MB
+        self.cleanup_days = CLEANUP_DAYS
 
         # Set up logging
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
+
+        # Log initialization paths
+        self.logger.info(f"Initialized FileHandler with paths:")
+        self.logger.info(f"New offers dir: {self.new_dir} (exists: {self.new_dir.exists()})")
+        self.logger.info(f"In progress dir: {self.in_progress_dir} (exists: {self.in_progress_dir.exists()})")
+        self.logger.info(f"Archived dir: {self.archived_dir} (exists: {self.archived_dir.exists()})")
 
     def get_new_offers(self) -> List[Path]:
         """

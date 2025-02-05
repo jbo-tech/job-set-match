@@ -1,15 +1,14 @@
 # Core dependencies
-streamlit>=1.31.0
-pandas>=2.2.0
+streamlit>=1.28.0
+pandas>=2.0.0
+python-dotenv>=1.0.0
+anthropic>=0.7.0
 
-# PDF processing
+# Storage & Data handling
+pyarrow>=14.0.1
+
+# PDF handling
 PyPDF2>=3.0.0
 
-# Claude API
-anthropic>=0.5.0
-
-# File handling
-python-magic>=0.4.27
-python-dotenv>=1.0.0
-
-# Custom function
+# Codecarbon integration (optional)
+codecarbon>=2.3.0

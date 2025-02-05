@@ -12,17 +12,21 @@ from typing import Dict, List, Optional
 from datetime import datetime
 import logging
 
+from app.config import (
+    ANALYSES_FILE
+)
+
 class DataHandler:
     """Handles Claude API data operations."""
 
-    def __init__(self, data_file: Path):
+    def __init__(self):
         """
         Initialize DataHandler with data file path.
 
         Args:
             data_file (Path): Path to the JSON data file
         """
-        self.data_file = data_file
+        self.data_file = ANALYSES_FILE
         self.data_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Set up logging
@@ -97,11 +101,16 @@ class DataHandler:
         try:
             # Add analysis to the latest batch
             self.data["analyses"][-1]["offers"].append(analysis)
+
+            # Update API usage stats
             self.data["api_usage"]["analysis_costs"] += analysis.get("analysis_cost", 0.0)
             self.data["api_usage"]["total_cost"] += analysis.get("analysis_cost", 0.0)
             self.data["api_usage"]["requests_count"] += 1
+
             self.data["timestamp"] = datetime.now().isoformat()
+
             return self.save()
+
         except Exception as e:
             self.logger.error(f"Error adding analysis: {e}")
             return False
@@ -117,6 +126,7 @@ class DataHandler:
             bool: True if update successful, False otherwise
         """
         try:
+            # Update API usage stats
             self.data["api_usage"]["cover_letter_costs"] += cost
             self.data["api_usage"]["total_cost"] += cost
             self.data["api_usage"]["requests_count"] += 1

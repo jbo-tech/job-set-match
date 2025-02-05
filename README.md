@@ -1,193 +1,109 @@
 # Job Set & Match!
 
-A Streamlit application that leverages Claude AI to analyze job offers and generate application materials. The tool streamlines the job search process by offering data-driven insights about career fit and application potential.
+A Streamlit application that helps prioritize your job search by automatically analyzing job offers and generating application materials using Claude AI.
 
 ## Features
 
-- 📄 AI-powered job offer analysis using Claude
-- 📝 Smart cover letter generation
-- 📊 Interactive dashboard
-- 📁 Automatic file management
-- 💰 API cost tracking
+- Automated job offer analysis using Claude AI
+- Structured evaluation of career fit and profile match
+- Strategic recommendations for job applications
+- Automatic cover letter generation
+- PDF file management and organization
+- Efficient data storage with JSON and Parquet support
 
 ## Project Structure
 
 ```
-job_set_and_match/
-├── helpers/
-│   ├── __init__.py
-│   ├── analyzer.py      # Claude API integration for analysis and generation
-│   └── config.py        # Constants and environment configs
-│   ├── data_handler.py  # API response and cost tracking
-│   └── file_manager.py  # File operations handling
-├── offers/
-│   ├── new/            # New PDFs to analyze
-│   ├── in_progress/    # Being worked on
-│   └── archived/       # Rejected offers
-├── data/
-│   └── analyses.json   # Analysis results and API usage data
-├── .env.example        # Example environment variables
-├── .gitignore         # Git ignore rules
-├── app.py             # Main Streamlit application
-└── requirements.txt   # Project dependencies
+app/
+├── config/               # Configuration management
+│   ├── paths.py         # Path configurations
+│   └── settings.py      # Global settings
+├── core/                # Core functionality
+│   ├── analyzer/        # Job analysis components
+│   │   ├── prompts/     # Claude AI prompts
+│   │   └── offer_analyzer.py
+│   └── storage/         # Data storage components
+│       ├── base.py      # Abstract storage interface
+│       ├── json_handler.py
+│       └── parquet_handler.py
+├── data/                # Application data
+│   ├── analyses/        # Analysis results
+│   │   ├── json/       # JSON storage
+│   │   └── parquet/    # Parquet storage
+│   └── context/        # Personal context documents
+├── migrations/          # Data migration utilities
+├── offers/             # Job offer PDFs
+│   ├── 0_new/         # New offers to analyze
+│   ├── 1_in_progress/ # Offers being processed
+│   └── 2_archived/    # Processed offers
+└── app.py              # Main Streamlit application
 ```
 
 ## Setup
 
-1. Create a Python virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
+1. Clone the repository
 2. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-
-3. Set up environment variables:
-   ```bash
-   # Copy the example environment file
-   cp .env.example .env
-
-   # Edit .env with your settings
-   # Required:
-   ANTHROPIC_API_KEY=your-api-key-here
-
-   # Optional:
-   MAX_FILE_SIZE_MB=10
-   CLEANUP_DAYS=30
+3. Create a .env file with your API key:
    ```
-
-4. Run the application:
-   ```bash
-   streamlit run app.py
+   ANTHROPIC_API_KEY=your-api-key-here
    ```
 
 ## Usage
 
-1. Place job offer PDFs in the `offers/new` directory
-   - Files can have any name initially
-   - After analysis, files are automatically renamed using the format:
-     `company_position_date.pdf`
-
-2. Add personal context files to `./data` directory
-   - Add any text files (*.txt) that describe your profile:
-     * CV/Resume
-     * Professional summary
-     * Key achievements
-     * Skills and expertise
-     * Notable projects
-   - Files are automatically processed and used to enhance analysis accuracy
-   - Each file should be a plain text file (.txt format)
-   - Content should be clear and well-structured
-   - Files are used to provide context for both analysis and cover letter generation
-
+1. Place job offer PDFs in `app/offers/0_new/`
+2. Run the application:
+   ```bash
+   cd app
+   streamlit run app.py
+   ```
 3. Click "Analyze New Offers" to process job offers
-   - Claude AI analyzes each offer for:
-     * Company and position details
-     * Required and preferred skills
-     * Experience requirements
-     * Benefits and culture indicators
-     * Potential red flags
-   - Match scores are calculated based on the analysis
+4. View analyses, generate cover letters, and manage offers through the interface
 
-4. Use the dashboard to:
-   - View detailed analysis results
-   - Generate tailored cover letters
-   - Track API usage costs
-   - Archive processed offers
+## Configuration
 
-## Environment Variables
-
-The application uses the following environment variables:
-
-| Variable | Required | Description | Default |
-|----------|----------|-------------|---------|
-| ANTHROPIC_API_KEY | Yes | Your Claude API key | None |
-| MAX_FILE_SIZE_MB | No | Maximum PDF file size | 10 |
-| CLEANUP_DAYS | No | Days before archived files are deleted | 30 |
-
-## File Management
-
-The application manages files through three stages:
-
-1. **New** (`offers/new/`)
-   - Initial upload location
-   - Accepts any PDF filename
-   - Pending analysis
-
-2. **In Progress** (`offers/in_progress/`)
-   - Currently being analyzed
-   - Files renamed after analysis
-   - Cover letter generation available
-
-3. **Archived** (`offers/archived/`)
-   - Processed or rejected offers
-   - Auto-cleaned after specified days (CLEANUP_DAYS)
+- `MAX_FILE_SIZE_MB`: Maximum PDF file size (default: 10MB)
+- `CLEANUP_DAYS`: Days to keep archived files (default: 30)
 
 ## Data Storage
 
-Analysis results and API usage are stored in `data/analyses.json`:
+The application uses both JSON and Parquet storage:
+- JSON: Human-readable, backwards compatible
+- Parquet: Efficient columnar storage for better performance
 
-```json
-{
-  "timestamp": "2024-02-19T10:00:00",
-  "analyses": [
-    {
-      "timestamp": "2024-02-19T10:00:00",
-      "offers": [
-        {
-          "jobSummary": {
-            "jobTitle": "",
-            "jobCompany": "",
-            "jobLocation": "",
-            "jobOverview": ""
-          },
-          "careerFitAnalysis": {
-            "careerAnalysis": "",
-            "careerDevelopmentRating": 0
-          },
-          "profileMatchAssessment": {
-            "profileMatchAnalysis": "",
-            "matchCompatibilityRating": 0
-          },
-          "competitiveProfile": {
-            "competitiveAnalysis": "",
-            "successProbabilityRating": 0
-          },
-          "strategicRecommendations": {
-            "shouldApply": {
-              "decision": false,
-              "explanation": "",
-              "chanceRating": 0
-            },
-            "keyPointsToEmphasize": [],
-            "keyWordsToUse": [],
-            "preparationSteps": "",
-            "interviewFocusAreas": ""
-          },
-          "offerContent": "",
-          "file_name": "",
-          "analysis_cost": 0.0,
-          "cover_letter": {
-            "content": "",
-            "generated_at": "2024-02-19T10:00:00",
-            "generation_cost": 0.0
-          }
-        }
-      ]
-    }
-  ],
-  "api_usage": {
-    "total_cost": 0.0,
-    "analysis_costs": 0.0,
-    "cover_letter_costs": 0.0,
-    "requests_count": 0
-  }
-}
+To migrate from JSON to Parquet:
+```bash
+python migrate_storage.py --verify
+```
+
+## Personal Context
+
+Place your personal context documents in `app/data/context/`:
+- `profile.txt`: Professional profile
+- `resume.txt`: CV/Resume
+- `preferences.txt`: Job preferences
+
+## Development
+
+### Requirements
+- Python 3.8+
+- Dependencies listed in requirements.txt
+
+### Code Style
+The project uses:
+- black for code formatting
+- flake8 for linting
+- isort for import sorting
+- mypy for type checking
+
+### Testing
+Run tests with:
+```bash
+pytest
 ```
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+See LICENSE file.
