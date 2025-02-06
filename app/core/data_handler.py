@@ -88,7 +88,7 @@ class DataHandler:
             self.logger.error(f"Error saving data: {e}")
             return False
 
-    def add_analysis(self, analysis: Dict) -> bool:
+    def add_analysis(self, analysis: Dict, new_batch: bool = True) -> bool:
         """
         Add new analysis result and update API costs.
 
@@ -99,6 +99,13 @@ class DataHandler:
             bool: True if addition successful, False otherwise
         """
         try:
+            # Create new batch if needed
+            if new_batch and (not self.data["analyses"] or self.data["analyses"][-1]["offers"]):
+                self.data["analyses"].append({
+                    "timestamp": datetime.now().isoformat(),
+                    "offers": []
+                })
+
             # Add analysis to the latest batch
             self.data["analyses"][-1]["offers"].append(analysis)
 

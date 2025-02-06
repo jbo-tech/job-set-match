@@ -13,6 +13,8 @@ from datetime import datetime
 import logging
 from typing import List, Optional
 import re
+from PyPDF2 import PdfReader, PdfWriter
+import io
 
 from app.config import (
     NEW_OFFERS_PATH,
@@ -55,6 +57,10 @@ class FileManager:
         self.logger.info(f"In progress dir: {self.in_progress_dir} (exists: {self.in_progress_dir.exists()})")
         self.logger.info(f"Archived dir: {self.archived_dir} (exists: {self.archived_dir.exists()})")
 
+        # Configuration
+        self.logger.info(f"Max file size: {self.max_file_size_mb} MB")
+        self.logger.info(f"Cleanup days: {self.cleanup_days}")
+
     def get_new_offers(self) -> List[Path]:
         """
         Get list of new offer PDFs to analyze.
@@ -74,7 +80,60 @@ class FileManager:
         Returns:
             bool: True if file size is valid, False otherwise
         """
-        return file_path.stat().st_size <= self.max_file_size_bytes
+        # Convert file size to MB (1 MB = 1024 * 1024 bytes)
+        file_size_mb = file_path.stat().st_size / (1024 * 1024)
+        return file_size_mb <= self.max_file_size_mb
+
+    def compress_pdf(self, file_path: Path) -> Optional[Path]:
+        """
+        Compress PDF file if it exceeds size limit.
+
+        Args:
+            file_path (Path): Path to the PDF file
+
+        Returns:
+            Optional[Path]: Path to compressed file or None if compression failed
+        """
+        try:
+            # Si le fichier est déjà dans la limite
+            if self.validate_file_size(file_path):
+                return file_path
+
+            self.logger.info(f"Compressing file: {file_path}")
+
+            # Lire le PDF
+            reader = PdfReader(str(file_path))
+            writer = PdfWriter()
+
+            # Copier chaque page avec compression
+            for page in reader.pages:
+                writer.add_page(page)
+
+            # Définir les paramètres de compression
+            writer.add_metadata(reader.metadata)
+
+            # Créer le nom du fichier compressé
+            compressed_path = file_path.parent / f"compressed_{file_path.name}"
+
+            # Sauvegarder le PDF compressé
+            with open(compressed_path, "wb") as f:
+                writer.write(f)
+
+            # Vérifier si la compression a réussi
+            if self.validate_file_size(compressed_path):
+                self.logger.info(f"Successfully compressed {file_path.name}")
+                # Supprimer l'original et renommer le compressé
+                file_path.unlink()
+                compressed_path.rename(file_path)
+                return file_path
+            else:
+                self.logger.warning(f"Compression insufficient for {file_path.name}")
+                compressed_path.unlink()
+                return None
+
+        except Exception as e:
+            self.logger.error(f"Error compressing PDF: {e}")
+            return None
 
     def standardize_filename(self, file_path: Path, company: str, position: str) -> Path:
         """
@@ -113,8 +172,12 @@ class FileManager:
                 return None
 
             if not self.validate_file_size(file_path):
-                self.logger.error(f"File too large: {file_path}")
-                return None
+                self.logger.info(f"File too large, attempting compression: {file_path}")
+                compressed_file = self.compress_pdf(file_path)
+                if not compressed_file:
+                    self.logger.error(f"Compression failed: {file_path}")
+                    return None
+                file_path = compressed_file
 
             new_path = self.in_progress_dir / file_path.name
             shutil.move(str(file_path), str(new_path))

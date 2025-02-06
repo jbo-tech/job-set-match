@@ -68,6 +68,8 @@ def analyze_new_offers():
         st.warning("No new offers found in the input directory.")
         return
 
+    first_offer = True # Flag to identify the first offer only
+
     for offer_path in new_offers:
         # Check file size
         if (offer_path.stat().st_size / (1024 * 1024)) > MAX_FILE_SIZE_MB:
@@ -102,8 +104,9 @@ def analyze_new_offers():
         analysis["file_name"] = standardized_path.name
 
         # Save analysis
-        if st.session_state.data_handler.add_analysis(analysis):
+        if st.session_state.data_handler.add_analysis(analysis, new_batch=first_offer):
             st.success(f"Successfully analyzed {standardized_path.name}")
+            first_offer = False
         else:
             st.error(f"Failed to save analysis for {standardized_path.name}")
 
