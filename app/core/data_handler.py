@@ -99,8 +99,18 @@ class DataHandler:
             bool: True if addition successful, False otherwise
         """
         try:
+            # Check if a new batch is needed
+            if self.data["analyses"]:
+                last_batch = self.data["analyses"][-1]
+                last_batch_date = datetime.fromisoformat(last_batch["timestamp"]).date()
+                today_date = datetime.now().date()
+            else:
+                last_batch = None
+                last_batch_date = None
+                today_date = datetime.now().date()
+
             # Create new batch if needed
-            if new_batch and (not self.data["analyses"] or self.data["analyses"][-1]["offers"]):
+            if new_batch and (not last_batch or last_batch["offers"]) and (last_batch_date != today_date):
                 self.data["analyses"].append({
                     "timestamp": datetime.now().isoformat(),
                     "offers": []

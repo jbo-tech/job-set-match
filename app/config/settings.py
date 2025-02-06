@@ -14,6 +14,10 @@ load_dotenv()
 MAX_FILE_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', 10))
 CLEANUP_DAYS = int(os.getenv('CLEANUP_DAYS', 30))
 
+# Batch processing configuration
+BATCH_MAX_SIZE = 100  # Maximum number of requests per batch
+BATCH_POLLING_INTERVAL = 5  # Seconds between polling for batch status
+
 # API configurations
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
