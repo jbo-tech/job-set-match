@@ -7,12 +7,21 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
+import asyncio
 
 # Import helpers
 from app.core.file_manager import FileManager
 from app.core.data_handler import DataHandler
 from app.core.analyzer import OfferAnalyzer
-from app.config import init_config, IN_PROGRESS_PATH, ARCHIVED_PATH, MAX_FILE_SIZE_MB, CLEANUP_DAYS
+from app.config import (
+    init_config,
+    IN_PROGRESS_PATH,
+    ARCHIVED_PATH,
+    MAX_FILE_SIZE_MB,
+    CLEANUP_DAYS,
+    BATCH_POLLING_INTERVAL,
+    BATCH_MAX_SIZE
+)
 
 def check_environment():
     """Check if all required environment variables are set."""
@@ -59,6 +68,45 @@ def initialize_app():
 
     if 'data_handler' not in st.session_state:
         st.session_state.data_handler = init_data_handler()
+
+    if 'analyze_json' not in st.session_state:
+        st.session_state.analyze_json = None
+
+    st.markdown("""
+        <style>
+            .st-key-main_dashboard > div > .stColumn:first-child .stButton button {
+                text-align: left;
+                padding-left: 2em;
+                flex: auto;
+                flex-direction: row;
+                align-items: center;
+                justify-content: start;
+            }
+            .st-key-main_dashboard > div > .stColumn:first-child .stButton button div {
+                max-width: calc(100% - 2em);
+            }
+            .st-key-main_dashboard > div > .stColumn:first-child .stButton button div > p {
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                overflow: hidden;
+            }
+            .st-key-main_dashboard > div > .stColumn + .stColumn > div {
+                position: sticky;
+                top: 10vh;
+            }
+            .st-key-main_dashboard > div > .stColumn + .stColumn .st-key-analysis_content_container {
+                overflow-y: auto;
+                overflow-x: hidden;
+                max-height: 80vh;
+            }
+            .st-key-main_dashboard > div > .stColumn + .stColumn .st-key-analysis_content_container > * {
+                max-width: 100%;
+            }
+            .st-key-main_dashboard > div > .stColumn + .stColumn .st-key-analysis_content_container code {
+                white-space: normal;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
 def analyze_new_offers():
     """Analyze new job offers using Claude API."""
@@ -109,6 +157,50 @@ def analyze_new_offers():
             first_offer = False
         else:
             st.error(f"Failed to save analysis for {standardized_path.name}")
+    st.rerun()
+
+async def analyze_new_offers_sync():
+    """Analyze new job offers using Claude API in parallel."""
+    new_offers = st.session_state.file_manager.get_new_offers()
+
+    if not new_offers:
+        st.warning("No new offers found in the input directory.")
+        return
+
+    valid_offers = []
+    for offer_path in new_offers:
+        if (offer_path.stat().st_size / (1024 * 1024)) > MAX_FILE_SIZE_MB:
+            st.error(f"File too large: {offer_path.name}")
+            continue
+
+        new_path = st.session_state.file_manager.move_to_in_progress(offer_path)
+        if new_path:
+            valid_offers.append(new_path)
+        else:
+            st.error(f"Failed to process {offer_path.name}")
+
+    if valid_offers:
+        with st.spinner(f"Analyzing {len(valid_offers)} files in parallel..."):
+            analyses = await st.session_state.analyzer.analyze_pdfs_parallel(valid_offers)
+
+            for analysis in analyses:
+                file_path = IN_PROGRESS_PATH / analysis["file_name"]
+                standardized_path = st.session_state.file_manager.rename_after_analysis(
+                    file_path,
+                    analysis["jobSummary"]["jobCompany"],
+                    analysis["jobSummary"]["jobTitle"]
+                )
+
+                if standardized_path:
+                    analysis["file_name"] = standardized_path.name
+                    if st.session_state.data_handler.add_analysis(analysis):
+                        st.success(f"Successfully analyzed {standardized_path.name}")
+                    else:
+                        st.error(f"Failed to save analysis for {standardized_path.name}")
+                else:
+                    st.error(f"Failed to standardize filename for {analysis['file_name']}")
+
+    st.rerun()
 
 def generate_full_content(analysis: dict) -> str:
     """Generate markdown content for the analysis file.
@@ -123,8 +215,8 @@ def generate_full_content(analysis: dict) -> str:
 
     # Create frontmatter
     frontmatter = f"""---
-link: -
-sourcing: -
+link:
+sourcing:
 status: applied
 applied: {today}
 updated: {today}
@@ -145,7 +237,7 @@ updated: {today}
         if cover_letter_dict and isinstance(cover_letter_dict, dict):
             cover_letter = cover_letter_dict.get('content', '')
 
-    return f"{frontmatter}\n{offer_content}\n\n# Analyse\n{strategic_content}\n\n# Lettre de motivation\n{cover_letter}"
+    return f"{frontmatter}\n{offer_content}\n\n## Analyse\n{strategic_content}\n\n## Lettre de motivation\n{cover_letter}"
 
 def generate_analysis_markdown(analysis: dict):
     """Generate markdown analysis for display."""
@@ -173,7 +265,7 @@ def generate_cover_letter(analysis: dict):
         print(result)
         if result:
             st.session_state.data_handler.add_cover_letter_cost(result["generation_cost"])
-            st.code(result["content"], language=None)
+            st.code(result["content"], language=None, height=200)
 
             st.download_button(
                 "Download Cover Letter",
@@ -271,102 +363,9 @@ def group_analyses_by_day(analyses: list) -> dict:
     # Sort days
     return dict(sorted(grouped.items(), reverse=True))
 
-def display_dashboard():
-    """Display the main dashboard with offer analyses and API usage."""
-    analyses = st.session_state.data_handler.get_all_analyses()
+def analyze_footer(debug_info: bool = False):
+    """Display footer with API usage stats and configuration info."""
     api_usage = st.session_state.data_handler.get_api_usage()
-
-    # Filter out forgotten analyses
-    active_analyses = [a for a in analyses if not a.get("forget", False)]
-
-    # Add period filter
-    period = st.pills(
-        "Selected Period",
-        options=["Today", "Last Week", "Last Month", "All"],
-        selection_mode="single",
-        label_visibility="hidden",
-        default="Today"
-    )
-
-    # Filter by period
-    filtered_analyses = filter_analyses_by_period(active_analyses, period)
-
-    # Group by day
-    grouped_analyses = group_analyses_by_day(filtered_analyses)
-
-    # Analyses Table
-    # st.subheader("Job Offers")
-    if not filtered_analyses:
-        st.info("No analyzed offers to display.")
-
-    # Display analyses grouped by day
-    for day, day_analyses in grouped_analyses.items():
-        st.markdown(f"### {day.strftime('%A %d %B %Y')} - {len(day_analyses)} offers")
-        for analysis in day_analyses:
-            decision_icon = "✅" if analysis['strategicRecommendations']['shouldApply']['decision'] else "❌"
-            with st.expander(f"{analysis['jobSummary']['jobCompany']} - {analysis['jobSummary']['jobTitle']} - {analysis['strategicRecommendations']['shouldApply'].get('chanceRating', 0)}/10" , icon=decision_icon):
-                col1, col2 = st.columns([0.7, 0.3], gap="medium")
-
-                analysis_content = generate_analysis_markdown(analysis)
-
-                with col1:
-
-                    st.markdown(analysis_content)
-
-                    # PDF viewer
-                    pdf_path = get_pdf_path(analysis['file_name'])
-                    st.write("Debug - PDF Path:", str(pdf_path))  # Display the resolved path
-
-                    if pdf_path and pdf_path.exists():
-                        with open(pdf_path, "rb") as pdf_file:
-                            st.download_button(
-                                label="View PDF",
-                                data=pdf_file,
-                                file_name="document.pdf",
-                                mime="application/pdf",
-                                    key=f"pdf_{analysis['file_name']}"
-                            )
-
-                with col2:
-                    # Forget button
-                    with st.container():
-                        if st.button("Forget", key=f"del_{analysis['file_name']}"):
-                            forget_offer(analysis['file_name'])
-                        st.divider()
-
-                    st.code(analysis.get('offerContent', ''), language=None)
-
-                    # Display content preview
-                    st.code(analysis_content, language=None)
-
-                    st.divider()
-
-                    # Generate Cover Letter
-                    if analysis.get("cover_letter"):
-                        st.info("Une lettre de motivation existe déjà pour cette offre.")
-                        st.code(analysis["cover_letter"]["content"], language=None)
-
-                        st.download_button(
-                            "Download Cover Letter",
-                            analysis["cover_letter"]["content"],
-                            file_name=f"{analysis['file_name']}_cover_letter_{datetime.now().strftime('%Y%m%d')}.txt",
-                            key=f"dl_{analysis['file_name']}-coverletter"
-                        )
-                    else:
-                        if st.button("Generate Cover Letter", key=f"gen_{analysis['file_name']}"):
-                            generate_cover_letter(analysis)
-
-                    st.divider()
-
-                    # Download markdown button
-                    markdown_content = generate_full_content(analysis)
-                    st.download_button(
-                        "Download Analysis (.md)",
-                        markdown_content,
-                        file_name=f"{analysis['jobSummary']['jobCompany']} - {analysis['jobSummary']['jobTitle']} - {analysis['strategicRecommendations']['shouldApply'].get('chanceRating', 0)}.md",
-                        mime="text/markdown",
-                        key=f"dl_{analysis['file_name']}-markdown"
-                    )
 
     st.divider()
 
@@ -382,15 +381,55 @@ def display_dashboard():
     with col4:
         st.metric("Requests", f"{api_usage['requests_count']}")
 
-    # Configuration Info
-    st.sidebar.subheader("Configuration")
-    st.sidebar.info(f"""
-    - Max file size: {MAX_FILE_SIZE_MB}MB
-    - Cleanup after: {CLEANUP_DAYS} days
-    """)
+    if debug_info:
 
-    # Add debug info in development
-    debug_info = st.sidebar.checkbox("Show Debug Info",key="debug_info")
+        # Add file manager info
+        st.sidebar.subheader("File System:")
+        st.sidebar.write(f"New Offers Path: {st.session_state.file_manager.new_dir}")
+        st.sidebar.write(f"Path exists: {st.session_state.file_manager.new_dir.exists()}")
+        st.sidebar.write(f"Files in directory: {list(st.session_state.file_manager.new_dir.glob('*.pdf'))}")
+        st.sidebar.divider()
+
+        # Verify API usage data
+        st.sidebar.subheader("API Usage:")
+        st.sidebar.write(api_usage)
+        st.sidebar.divider()
+
+def set_var_analyze_json(value: dict = ""):
+    st.session_state["analyze_json"] = value
+
+def analyze_list(debug_info: bool = False, period: str = "Today"):
+    """Display a list of analyzed job offers."""
+    analyses = st.session_state.data_handler.get_all_analyses()
+
+    # Filter out forgotten analyses
+    active_analyses = [a for a in analyses if not a.get("forget", False)]
+
+    # Filter by period
+    filtered_analyses = filter_analyses_by_period(active_analyses, period)
+
+    # Group by day
+    grouped_analyses = group_analyses_by_day(filtered_analyses)
+
+    # Analyses Table
+    if not filtered_analyses:
+        st.info("No analyzed offers to display.")
+
+    # Display analyses grouped by day
+    for day, day_analyses in grouped_analyses.items():
+        st.markdown(f"### {day.strftime('%A %d %B %Y')} - {len(day_analyses)} offers")
+        for analysis in day_analyses:
+            decision_icon = "✅" if analysis['strategicRecommendations']['shouldApply']['decision'] else "❌"
+
+            st.button(f"{analysis['jobSummary']['jobCompany']} - {analysis['jobSummary']['jobTitle']} - {analysis['strategicRecommendations']['shouldApply'].get('chanceRating', 0)}/10" , \
+                        icon=decision_icon, \
+                        key=f"btn_{analysis['file_name']}", \
+                        help=f"Show info about the offer", \
+                        type="secondary", \
+                        use_container_width=True,
+                        args=(analysis,),
+                        on_click=set_var_analyze_json)
+
     if debug_info:
 
         # Add internal state info
@@ -403,6 +442,10 @@ def display_dashboard():
             st.sidebar.write("First group:", list(grouped_analyses.items())[0])
             st.sidebar.divider()
 
+        # Add Streamlit context info
+        st.context.cookies
+        st.context.headers
+
         # Add storage info
         # st.sidebar.subheader("Storage Information:")
         # st.sidebar.write("Storage Base Path:", st.session_state.data_handler.data_path)
@@ -410,13 +453,6 @@ def display_dashboard():
         # st.sidebar.write(f"- analyses.parquet exists: {(base_path / 'analyses.parquet').exists()}")
         # st.sidebar.write(f"- api_usage.parquet exists: {(base_path / 'api_usage.parquet').exists()}")
         # st.sidebar.divider()
-
-        # Add file manager info
-        st.sidebar.subheader("File System:")
-        st.sidebar.write(f"New Offers Path: {st.session_state.file_manager.new_dir}")
-        st.sidebar.write(f"Path exists: {st.session_state.file_manager.new_dir.exists()}")
-        st.sidebar.write(f"Files in directory: {list(st.session_state.file_manager.new_dir.glob('*.pdf'))}")
-        st.sidebar.divider()
 
         # # Add analyses data
         # st.sidebar.subheader("Analyses DataFrame Info:")
@@ -442,11 +478,70 @@ def display_dashboard():
         #     st.sidebar.warning("DataFrame is empty!")
         # st.sidebar.divider()
 
-        # Verify API usage data
-        st.sidebar.subheader("API Usage:")
-        st.sidebar.write(api_usage)
-        st.sidebar.divider()
+@st.fragment()
+def analyze_content(analysis: dict = None):
+    """Display detailed analysis content for a selected job offer."""
+    test = st.empty()
+    if analysis:
+        analysis_content = generate_analysis_markdown(analysis)
+        with test.container(border=True, key="analysis_content_container"):
 
+            st.markdown(analysis_content)
+
+            # PDF viewer
+            pdf_path = get_pdf_path(analysis['file_name'])
+            st.write("Debug - PDF Path:", str(pdf_path))  # Display the resolved path
+
+            if pdf_path and pdf_path.exists():
+                with open(pdf_path, "rb") as pdf_file:
+                    st.download_button(
+                        label="View PDF",
+                        data=pdf_file,
+                        file_name="document.pdf",
+                        mime="application/pdf",
+                            key=f"pdf_{analysis['file_name']}"
+                    )
+            st.divider()
+
+            # Forget button
+            if st.button("Forget", key=f"del_{analysis['file_name']}"):
+                forget_offer(analysis['file_name'])
+            st.divider()
+
+            st.code(analysis.get('offerContent', ''), language=None)
+
+            # Display content preview
+            st.code(analysis_content, language=None, height=400)
+
+            st.divider()
+
+            # Generate Cover Letter
+            if analysis.get("cover_letter"):
+                st.info("Une lettre de motivation existe déjà pour cette offre.")
+                st.code(analysis["cover_letter"]["content"], language=None)
+
+                st.download_button(
+                    "Download Cover Letter",
+                    analysis["cover_letter"]["content"],
+                    file_name=f"{analysis['file_name']}_cover_letter_{datetime.now().strftime('%Y%m%d')}.txt",
+                    key=f"dl_{analysis['file_name']}-coverletter"
+                )
+            else:
+                if st.button("Generate Cover Letter", key=f"gen_{analysis['file_name']}"):
+                    generate_cover_letter(analysis)
+
+            st.divider()
+
+            # Download markdown button
+            markdown_content = generate_full_content(analysis)
+            st.download_button(
+                "Download Analysis (.md)",
+                markdown_content,
+                file_name=f"{analysis['jobSummary']['jobCompany']} - {analysis['jobSummary']['jobTitle']} - {analysis['strategicRecommendations']['shouldApply'].get('chanceRating', 0)}.md",
+                mime="text/markdown",
+                key=f"dl_{analysis['file_name']}-markdown",
+                type="primary"
+            )
 
 def main():
     """Main application function."""
@@ -459,13 +554,16 @@ def main():
     st.write(" ")
 
     # Primary Action
-    with st.container():
+    with st.container(key="primary_action"):
         # Clear Analyses Button
         col1, col2 = st.columns([1, 3],vertical_alignment="center")
 
         with col1:
             if st.button(f"Analyze {len(st.session_state.file_manager.get_new_offers())} New Offers", type="primary"):
-                analyze_new_offers()
+                # import asyncio
+                # asyncio.run(analyze_new_offers())
+                # analyze_new_offers()
+                asyncio.run(analyze_new_offers_sync())
 
         with col2:
             st.markdown(f"")
@@ -478,8 +576,40 @@ def main():
             #     else:
             #         st.error("Failed to clear analyses")
 
+    # Configuration Info
+    st.sidebar.subheader("Configuration")
+    st.sidebar.info(f"""
+    - Max file size: {MAX_FILE_SIZE_MB}MB
+    - Cleanup after: {CLEANUP_DAYS} days
+    """)
+
+    # Add debug information
+    debug_info = st.sidebar.checkbox("Show Debug Info",key="debug_info")
+
+    # Add period filter
+    period = st.pills(
+        "Selected Period",
+        options=["Today", "Last Week", "Last Month", "All"],
+        selection_mode="single",
+        label_visibility="hidden",
+        default="Today"
+    )
+
     # Main Dashboard
-    display_dashboard()
+    with st.container(key="main_dashboard"):
+
+        list_col, content_col = st.columns([0.5, 0.5], gap="medium", vertical_alignment="top")
+
+        with list_col:
+            # Sidebar with list of offers
+            analyze_list(debug_info,period)
+
+        with content_col:
+            # Main content area
+            analyze_content(st.session_state["analyze_json"])
+
+    # Display footer
+    analyze_footer(debug_info)
 
 if __name__ == "__main__":
     main()

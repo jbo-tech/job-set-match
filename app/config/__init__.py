@@ -26,6 +26,8 @@ from .settings import (
     COVER_LETTER_TEMPERATURE,
     TOKEN_COST,
     PREFERRED_STORAGE,
+    BATCH_POLLING_INTERVAL,
+    BATCH_MAX_SIZE,
     init_config
 )
 
@@ -50,5 +52,7 @@ __all__ = [
     'COVER_LETTER_TEMPERATURE',
     'TOKEN_COST',
     'PREFERRED_STORAGE',
+    'BATCH_POLLING_INTERVAL',
+    'BATCH_MAX_SIZE',
     'init_config'
 ]

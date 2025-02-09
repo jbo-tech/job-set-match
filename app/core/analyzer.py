@@ -9,12 +9,16 @@ This module handles:
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, List, Union
+from typing import Dict, Optional, List, Union, Any
+import logging
+from pathlib import Path
 import json
 import os
 from datetime import datetime, timezone
-from anthropic import Anthropic
 import base64
+import asyncio
+
+from anthropic import Anthropic
 
 from app.config import (
     CONTEXT_PATH,
@@ -23,7 +27,9 @@ from app.config import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
     COVER_LETTER_TEMPERATURE,
-    TOKEN_COST
+    TOKEN_COST,
+    BATCH_POLLING_INTERVAL,
+    BATCH_MAX_SIZE
 )
 
 from app.prompts import (
@@ -94,6 +100,113 @@ class OfferAnalyzer:
         except Exception as e:
             self.logger.error(f"Error loading personal documents: {e}")
             return ""
+
+    async def analyze_pdf_async(self, file_path: Path) -> Optional[Dict]:
+        """
+        Analyze a single PDF file asynchronously.
+        """
+        try:
+            # Lecture du PDF
+            with open(file_path, "rb") as f:
+                pdf_data = base64.b64encode(f.read()).decode("utf-8")
+
+            # Create message
+            start_time = datetime.now(timezone.utc)
+            message = self.client.messages.create(
+                model=DEFAULT_MODEL,
+                max_tokens=DEFAULT_MAX_TOKENS,
+                temperature=DEFAULT_TEMPERATURE,
+                system=[
+                    {"type": "text", "text": SYSTEM_PROMPT},
+                    {
+                        "type": "text",
+                        "text": self._load_personal_documents(),
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                ],
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": pdf_data
+                            }
+                        },
+                        {"type": "text", "text": ANALYSIS_PROMPT}
+                    ]
+                }]
+            )
+            end_time = datetime.now(timezone.utc)
+
+            # Calculate costs
+            analysis_cost = message.usage.output_tokens * 0.00001
+
+            # Log API usage statistics
+            duration = (end_time - start_time).total_seconds()
+            self.logger.info(f"API call time for {file_path.name}: {duration} seconds")
+            self.logger.info(f"API call input tokens: {message.usage.input_tokens} tokens")
+            self.logger.info(f"API call output tokens: {message.usage.output_tokens} tokens")
+            self.logger.info(f"API call cost: ${analysis_cost}")
+
+            # Parse response
+            try:
+                analysis_response = json.loads(message.content[0].text)
+            except json.JSONDecodeError:
+                self.logger.error("Failed to parse Claude's response as JSON")
+                analysis_response = self._recover_malformed_response(message.content[0].text)
+
+            # Validate response schema
+            if not self._validate_response_schema(analysis_response):
+                raise ValueError("Response does not match expected schema")
+
+            # Construction de l'analyse finale
+            analysis = {
+                **analysis_response,
+                "forget": False,
+                "note_total": analysis_response["careerFitAnalysis"]["careerDevelopmentRating"] \
+                    + analysis_response["profileMatchAssessment"]["matchCompatibilityRating"] \
+                    + analysis_response["competitiveProfile"]["successProbabilityRating"],
+                "analysis_cost": analysis_cost,
+                "file_name": file_path.name,
+                "cover_letter": None,
+                "analysis_markdown": self.generate_analysis_markdown(analysis_response)
+            }
+
+            # Génération automatique de la lettre de motivation si recommandé
+            if analysis_response["strategicRecommendations"]['shouldApply']["decision"]:
+                self.generate_cover_letter(analysis)  # On utilise la fonction existante
+
+            return analysis
+
+        except Exception as e:
+            self.logger.error(f"Error analyzing PDF {file_path}: {e}")
+            return None
+
+    async def analyze_pdfs_parallel(self, pdf_files: List[Path], max_concurrent: int = 3) -> List[Dict]:
+        """
+        Analyze multiple PDF files in parallel.
+        """
+        # Créer un sémaphore pour limiter les requêtes concurrentes
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def analyze_with_semaphore(file_path: Path):
+            async with semaphore:
+                return await self.analyze_pdf_async(file_path)
+
+        # Créer les tâches pour chaque fichier
+        tasks = [
+            analyze_with_semaphore(file_path)
+            for file_path in pdf_files
+        ]
+
+        # Exécuter toutes les tâches en parallèle
+        results = await asyncio.gather(*tasks)
+
+        # Filtrer les résultats None (erreurs)
+        return [r for r in results if r is not None]
 
     def analyze_pdf(self, file_path: Path) -> Optional[Dict]:
         """
@@ -181,6 +294,10 @@ class OfferAnalyzer:
                 "cover_letter": None,
                 "analysis_markdown": self.generate_analysis_markdown(analysis_response)
             }
+
+            # Génération automatique de la lettre de motivation si recommandé
+            if analysis_response["strategicRecommendations"]['shouldApply']["decision"]:
+                self.generate_cover_letter(analysis)
 
             return analysis
 
